@@ -8,6 +8,103 @@ import mongoose from "mongoose";
 
 const router = express.Router();
 
+// List Products (admin)
+router.get(
+  "/product/list",
+  checkCookies,
+  asyncHandler(async (req, res) => {
+    const {
+      page,
+      limit,
+      search,
+      category,
+      status,
+      priceMin,
+      priceMax,
+      dateFrom,
+      dateTo,
+      sortBy,
+      sortOrder,
+    } = req.query;
+
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const query: Record<string, unknown> = {};
+
+    if (search && typeof search === "string") {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { sku: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (category && typeof category === "string") {
+      query.category = category;
+    }
+
+    if (status && typeof status === "string" && status !== "all") {
+      if (status === "live") query.isActive = true;
+      else if (status === "draft") query.isActive = false;
+    }
+
+    if (priceMin || priceMax) {
+      const priceQ: Record<string, number> = {};
+      if (priceMin) priceQ.$gte = Number(priceMin);
+      if (priceMax) priceQ.$lte = Number(priceMax);
+      if (Object.keys(priceQ).length) query.price = priceQ;
+    }
+
+    if (dateFrom || dateTo) {
+      const dateQ: Record<string, Date> = {};
+      if (dateFrom) dateQ.$gte = new Date(dateFrom as string);
+      if (dateTo) dateQ.$lte = new Date(dateTo as string);
+      if (Object.keys(dateQ).length) query.createdAt = dateQ;
+    }
+
+    const sortField = (sortBy as string) || "createdAt";
+    const order = sortOrder === "asc" ? 1 : -1;
+    const sort: Record<string, 1 | -1> = { [sortField]: order };
+
+    const [products, total] = await Promise.all([
+      Product.find(query).sort(sort).skip(skip).limit(limitNumber).lean(),
+      Product.countDocuments(query),
+    ]);
+
+    return response.success(res, "Products retrieved successfully", 200, {
+      products,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages: Math.ceil(total / limitNumber),
+      },
+    });
+  }),
+);
+
+// Get single product (admin)
+router.get(
+  "/product/:productId",
+  checkCookies,
+  asyncHandler(async (req, res) => {
+    const productId = req.params.productId;
+
+    if (!productId) {
+      return response.failure(res, "Product ID is required", 400);
+    }
+
+    const product = await Product.findById(productId).lean();
+
+    if (!product) {
+      return response.failure(res, "Product not found", 404);
+    }
+
+    return response.success(res, "Product retrieved successfully", 200, product);
+  }),
+);
+
 // Create Product
 router.post(
   "/product/create",

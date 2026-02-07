@@ -39,6 +39,26 @@ router.get(
   }),
 );
 
+router.get(
+  "/coupon/:couponId",
+  checkCookies,
+  asyncHandler(async (req, res) => {
+    const couponId = req.params.couponId;
+
+    if (!couponId) {
+      return response.failure(res, "Coupon ID is required", 400);
+    }
+
+    const coupon = await Coupon.findById(couponId).lean();
+
+    if (!coupon) {
+      return response.failure(res, "Coupon not found", 404);
+    }
+
+    return response.success(res, "Coupon retrieved successfully", 200, coupon);
+  }),
+);
+
 router.post(
   "/coupon/create",
   checkCookies,
