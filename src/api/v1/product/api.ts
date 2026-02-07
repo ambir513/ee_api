@@ -7,40 +7,6 @@ import Review from "../../../schema/review.js";
 const router = express.Router();
 
 router.get(
-  "/:productId",
-  asyncHandler(async (req, res) => {
-    const productId = req.params.productId;
-
-    if (!productId) {
-      return response.failure(res, "productId is invalid", 400);
-    }
-
-    const getProduct = await Product.findById(productId, {
-      __v: 0,
-      updatedAt: 0,
-      createdAt: 0,
-      
-    }).lean();
-
-    const getReview = await Review.find({ productId: productId }).lean();
-
-    if (!getProduct) {
-      return response.failure(res, "Product not found", 404);
-    }
-    const formattedProduct = {
-      ...getProduct,
-      review: getReview,
-    };
-
-    return response.success(
-      res,
-      "Product is successfully retrieved",
-      200,
-      formattedProduct,
-    );
-  }),
-);
-router.get(
   "/filter",
   asyncHandler(async (req, res) => {
     const {
@@ -83,6 +49,41 @@ router.get(
       "Products are successfully retrieved",
       200,
       products,
+    );
+  }),
+);
+
+router.get(
+  "/:productId",
+  asyncHandler(async (req, res) => {
+    const productId = req.params.productId;
+
+    if (!productId) {
+      return response.failure(res, "productId is invalid", 400);
+    }
+
+    const getProduct = await Product.findById(productId, {
+      __v: 0,
+      updatedAt: 0,
+      createdAt: 0,
+      
+    }).lean();
+
+    const getReview = await Review.find({ productId: productId }).lean();
+
+    if (!getProduct) {
+      return response.failure(res, "Product not found", 404);
+    }
+    const formattedProduct = {
+      ...getProduct,
+      review: getReview,
+    };
+
+    return response.success(
+      res,
+      "Product is successfully retrieved",
+      200,
+      formattedProduct,
     );
   }),
 );

@@ -9,6 +9,36 @@ import mongoose from "mongoose";
 
 const router = express.Router();
 
+// List all coupons (admin)
+router.get(
+  "/coupons/list",
+  checkCookies,
+  asyncHandler(async (req, res) => {
+    const { page, limit } = req.query;
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 20;
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const coupons = await Coupon.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNumber)
+      .lean();
+
+    const total = await Coupon.countDocuments();
+
+    return response.success(res, "Coupons retrieved successfully", 200, {
+      coupons,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages: Math.ceil(total / limitNumber),
+      },
+    });
+  }),
+);
+
 router.post(
   "/coupon/create",
   checkCookies,

@@ -14,7 +14,7 @@ router.get(
   checkCookies,
   asyncHandler(async (req, res) => {
     const user = await User.findById(req?._id!).select(
-      "-password -__v -createdAt -updatedAt -role",
+      "-password -__v -createdAt -updatedAt",
     );
     return response.success(res, "User fetched successfully", 200, user);
   }),
