@@ -23,7 +23,7 @@ export default async function generateOTP(
       code: otp,
     }),
     {
-      EX: expire * 60,
+      ex: expire * 60,
     },
   );
 
