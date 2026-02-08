@@ -1,15 +1,28 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
-    "strict": true,
+    /* Output */
     "outDir": "dist",
     "rootDir": "src",
+
+    /* Node 22 + ESM */
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    /* JS Target */
+    "target": "ES2022",
+    "lib": ["ES2022"],
+
+    /* Interop */
     "esModuleInterop": true,
-    "module": "node16",
-    "moduleResolution": "nodenext",
-    "isolatedModules": true,
-    "skipLibCheck": true
+    "resolveJsonModule": true,
+
+    /* Type Safety */
+    "strict": true,
+    "skipLibCheck": true,
+
+    /* Clean Output */
+    "sourceMap": false
   },
-  "include": ["**/*.ts"],
+  "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }
