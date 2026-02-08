@@ -21,7 +21,6 @@ async function connectRedis() {
   try {
     redisClient.on("error", (err) => {
       log("Redis Client Error", "error");
-      process.exit(1);
     });
 
     if (!redisClient.isOpen) {
@@ -31,7 +30,6 @@ async function connectRedis() {
     log("Redis Client Connected", "success");
   } catch (error) {
     log(`Failed to connect to Redis`, "error");
-    process.exit(1);
   }
 }
 
