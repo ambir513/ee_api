@@ -2,7 +2,6 @@ import "./libs/dotenv.js";
 import express from "express";
 import response from "./utils/response.js";
 import connectDB from "./libs/mongoose.js";
-import { connectRedis } from "./libs/redis.js";
 import { log } from "./utils/logger.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -47,9 +46,7 @@ app.use((err, req, res, next) => {
     return response.failure(res, err.message, 500);
 });
 connectDB().then(() => {
-    connectRedis().then(() => {
-        app.listen(PORT, () => {
-            log(`Running - http://localhost:${PORT}`, "success");
-        });
+    app.listen(PORT, () => {
+        log(`Running - http://localhost:${PORT}`, "success");
     });
 });

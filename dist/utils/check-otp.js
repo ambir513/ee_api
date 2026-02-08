@@ -9,6 +9,13 @@ export default async function checkOTP(label, email, otp) {
     const cachedOTP = await redisClient.get(`otp?${label}=${email}`);
     console.log(cachedOTP);
     if (cachedOTP) {
+        if (typeof cachedOTP !== "string") {
+            return {
+                status: false,
+                message: "OTP has expired or is invalid",
+                data: null,
+            };
+        }
         const parsedOTP = JSON.parse(cachedOTP);
         if (otp) {
             console.log(parsedOTP.code === parseInt(otp, 10));
