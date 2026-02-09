@@ -4,12 +4,13 @@ import response from "../../../utils/response.js";
 import InputSensitization from "../../../utils/m-input-sensitization.js";
 import User from "../../../schema/user.js";
 import generateOTP from "../../../utils/generate-otp.js";
-import checkOTP from "../../../utils/check-otp.js";
+
 import { createAuthToken } from "./utils.js";
 import checkCookies from "../../../utils/m-check-cookies.js";
 import clearOTP from "../../../utils/clear-otp.js";
 import { isAdminEmail } from "../../../routes.js";
 import { sendEmail } from "../../../libs/brevo.js";
+import OTP from "../../../schema/otp.js";
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { name, email, password } = req.body;
 
-    const isAlreadySendOtp = await checkOTP("auth", email);
+    const isAlreadySendOtp = await OTP.checkOTP("auth", email);
 
     if (isAlreadySendOtp.status) {
       return response.failure(res, isAlreadySendOtp.message, 400);
@@ -68,7 +69,7 @@ router.post(
   InputSensitization,
   asyncHandler(async (req, res) => {
     const { email, code } = req.body;
-    const isEmailCached = await checkOTP("auth", email, code);
+    const isEmailCached = await OTP.checkOTP("auth", email, code);
 
     if (!isEmailCached.status) {
       return response.failure(res, isEmailCached.message, 400);
@@ -110,7 +111,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
 
-    const isExistOTP = await checkOTP("auth", email);
+    const isExistOTP = await OTP.checkOTP("auth", email);
 
     if (isExistOTP.status) {
       return response.failure(res, isExistOTP.message, 400);
@@ -159,7 +160,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, newPassword } = req.body;
 
-    const isExistOTP = await checkOTP("pass", email);
+    const isExistOTP = await OTP.checkOTP("pass", email);
 
     if (isExistOTP.status) {
       return response.failure(res, isExistOTP.message, 400);
@@ -192,7 +193,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, code } = req.body;
 
-    const isEmailCached = await checkOTP("pass", email, code);
+    const isEmailCached = await OTP.checkOTP("pass", email, code);
 
     if (!isEmailCached.status) {
       return response.failure(res, isEmailCached.message, 400);

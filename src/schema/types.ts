@@ -49,7 +49,19 @@ export interface ReviewDocument extends Document {
   productId: Types.ObjectId;
   comment?: string;
 }
-
 export interface ReviewModel extends Model<ReviewDocument> {
   calcAverageRatings(productId: Types.ObjectId): Promise<void>;
+}
+
+export interface otpDocument extends Document {
+  email: string;
+  otp: string;
+  name: string;
+  password: string;
+  role: string;
+  label?: string;
+}
+
+export interface otpModel extends Model<otpDocument> {
+  checkOTP(label: string, email: string, otp?: string): Promise<any>;
 }

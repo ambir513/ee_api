@@ -1,5 +1,6 @@
-import redisClient from "../libs/redis.js";
+// import redisClient from "../libs/redis.js";
 import crypto from "node:crypto";
+import OTP from "../schema/otp.js";
 
 /**
  * Generates a numeric OTP 6 digits.
@@ -16,16 +17,14 @@ export default async function generateOTP(
 ): Promise<{ otp: number; otpSession: any }> {
   const otp = crypto.randomInt(100000, 1000000);
 
-  const otpSession = await redisClient.set(
-    `otp?${label}=${data.email}`,
-    JSON.stringify({
-      ...data,
-      code: otp,
-    }),
-    {
-      ex: expire * 60,
-    },
-  );
+  const otpSession = await OTP.create({
+    email: data.email,
+    otp: otp.toString(),
+    name: data.name,
+    password: data.password,
+    role: data.role,
+    label,
+  });
 
   return {
     otp,
