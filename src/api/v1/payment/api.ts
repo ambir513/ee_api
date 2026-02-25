@@ -76,7 +76,7 @@ router.post(
       razorpayOrderId: createOrder.id,
       amount: amount,
       userId: req?._id!,
-      productId: userCart.items[0]?.productId?._id || userCart.items[0]?.productId,
+      productId: (userCart.items[0]?.productId as any)?._id || userCart.items[0]?.productId,
       status: createOrder.status,
       currency: createOrder.currency,
       receipt: createOrder.receipt!,
