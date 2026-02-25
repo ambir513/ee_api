@@ -6,6 +6,34 @@ import Review from "../../../schema/review.js";
 
 const router = express.Router();
 
+// Latest products (sorted by newest first)
+router.get(
+  "/latest",
+  asyncHandler(async (req, res) => {
+    const limit = Number(req.query.limit) || 8;
+    const products = await Product.find({ isActive: true })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return response.success(res, "Latest products retrieved", 200, products);
+  }),
+);
+
+// Popular products (sorted by highest rating)
+router.get(
+  "/popular",
+  asyncHandler(async (req, res) => {
+    const limit = Number(req.query.limit) || 8;
+    const products = await Product.find({ isActive: true, ratingCount: { $gt: 0 } })
+      .sort({ averageRating: -1, ratingCount: -1 })
+      .limit(limit)
+      .lean();
+
+    return response.success(res, "Popular products retrieved", 200, products);
+  }),
+);
+
 router.get(
   "/filter",
   asyncHandler(async (req, res) => {
@@ -35,22 +63,22 @@ router.get(
       ...(rating && { averageRating: { $gte: Number(rating) } }),
       ...(priceMin || priceMax
         ? {
-            price: {
-              ...(priceMin && { $gte: Number(priceMin) }),
-              ...(priceMax && { $lte: Number(priceMax) }),
-            },
-          }
+          price: {
+            ...(priceMin && { $gte: Number(priceMin) }),
+            ...(priceMax && { $lte: Number(priceMax) }),
+          },
+        }
         : {}),
       ...(searchTerm
         ? {
-            $or: [
-              { name: { $regex: searchTerm, $options: "i" } },
-              { sku: { $regex: searchTerm, $options: "i" } },
-              { category: { $regex: searchTerm, $options: "i" } },
-              { subCategory: { $regex: searchTerm, $options: "i" } },
-              { design: { $regex: searchTerm, $options: "i" } },
-            ],
-          }
+          $or: [
+            { name: { $regex: searchTerm, $options: "i" } },
+            { sku: { $regex: searchTerm, $options: "i" } },
+            { category: { $regex: searchTerm, $options: "i" } },
+            { subCategory: { $regex: searchTerm, $options: "i" } },
+            { design: { $regex: searchTerm, $options: "i" } },
+          ],
+        }
         : {}),
     };
 
@@ -85,7 +113,9 @@ router.get(
       createdAt: 0,
     }).lean();
 
-    const getReview = await Review.find({ productId: productId }).lean();
+    const getReview = await Review.find({ productId: productId })
+      .populate("userId", "name email")
+      .lean();
 
     if (!getProduct) {
       return response.failure(res, "Product not found", 404);

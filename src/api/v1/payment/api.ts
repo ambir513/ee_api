@@ -8,55 +8,85 @@ import razorpayInstance from "../../../libs/razorpay.js";
 import Order from "../../../schema/order.js";
 import OrderStatus from "../../../schema/orderStatus.js";
 import { validateWebhookSignature } from "razorpay/dist/utils/razorpay-utils.js";
-import order from "../../../schema/order.js";
 import AddToCart from "../../../schema/addtocart.js";
 
 const router = express.Router();
 
+// Create Razorpay order from cart
 router.post(
   "/create",
   checkCookies,
   asyncHandler(async (req, res) => {
-    const { amount, offer, name, email, address } = req.body;
+    const { amount, offer, name, email, addressId } = req.body;
 
-    const isAddressExist = await Address.findById({ _id: address._id }).lean();
+    if (!addressId) {
+      return response.failure(res, "Address is required", 400);
+    }
+
+    if (!amount || amount <= 0) {
+      return response.failure(res, "Invalid amount", 400);
+    }
+
+    const isAddressExist = await Address.findOne({
+      _id: addressId,
+      userId: req?._id!,
+    }).lean();
 
     if (!isAddressExist) {
       return response.failure(res, "Address not found", 404);
     }
 
-    const isAddToCartProductsExist = await AddToCart.find(
-      {
-        userId: req?._id!,
-      },
-      { productId: 1 },
-    );
+    // Get user's cart with populated product info
+    const userCart = await AddToCart.findOne({
+      userId: req?._id!,
+    })
+      .populate("items.productId")
+      .lean();
 
-    if (isAddToCartProductsExist.length === 0) {
-      return response.failure(res, "Product not found", 404);
+    if (!userCart || !userCart.items || userCart.items.length === 0) {
+      return response.failure(res, "Cart is empty", 400);
     }
 
+    // Build product summary for Razorpay notes
+    const cartSummary = userCart.items.map((item: any) => ({
+      productId: item.productId?._id,
+      name: item.productId?.name,
+      color: item.color,
+      size: item.size,
+      quantity: item.quantity,
+      price: item.totalPrice,
+    }));
+
     const createOrder = await razorpayInstance.orders.create({
-      amount: amount,
+      amount: amount * 100, // Razorpay expects amount in paise
       currency: "INR",
       receipt: `receipt_order_${Date.now()}`,
       notes: {
         name: name,
-        products: JSON.stringify(isAddToCartProductsExist),
+        products: JSON.stringify(cartSummary),
         email: email,
-        offer: offer,
-        address: address,
+        offer: offer || "",
+        address: addressId,
       },
     });
 
+    // Save order to DB — associate with the first product for now
+    // (multi-product orders can be enhanced later)
     const order = await Order.create({
       razorpayOrderId: createOrder.id,
       amount: amount,
       userId: req?._id!,
+      productId: userCart.items[0]?.productId?._id || userCart.items[0]?.productId,
       status: createOrder.status,
       currency: createOrder.currency,
-      receipt: createOrder.receipt,
-      notes: createOrder.notes,
+      receipt: createOrder.receipt!,
+      notes: {
+        name: name,
+        products: cartSummary,
+        email: email,
+        offer: offer || "",
+        address: addressId,
+      },
     });
 
     return response.success(res, "Order created successfully", 201, {
@@ -66,26 +96,70 @@ router.post(
   }),
 );
 
-router.get(
+// Verify payment after Razorpay callback
+router.post(
   "/verify",
   checkCookies,
   asyncHandler(async (req, res) => {
-    const { orderId } = req.params;
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    } = req.body;
 
-    if (!orderId) {
-      return response.failure(res, "Order ID is required", 400);
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return response.failure(res, "Missing payment details", 400);
     }
 
-    const order = await Order.findOne({
-      $and: [{ _id: orderId }, { userId: req?._id! }],
-    }).lean();
+    // Verify signature
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const isValid = validateWebhookSignature(
+      body,
+      razorpay_signature,
+      process.env.RAZORPAY_KEY_SECRET!,
+    );
+
+    if (!isValid) {
+      return response.failure(res, "Payment verification failed", 400);
+    }
+
+    const order = await Order.findOneAndUpdate(
+      {
+        razorpayOrderId: razorpay_order_id,
+        userId: req?._id!,
+      },
+      {
+        $set: {
+          paymentId: razorpay_payment_id,
+          status: "paid",
+        },
+      },
+      { new: true },
+    );
 
     if (!order) {
       return response.failure(res, "Order not found", 404);
     }
+
+    // Create order status entry
+    await OrderStatus.create({
+      orderId: order._id,
+      status: "Order",
+      description: "Order placed and payment received successfully",
+      productId: order.productId,
+      userId: req?._id!,
+    });
+
+    // Clear user's cart after successful payment
+    await AddToCart.findOneAndDelete({ userId: req?._id! });
+
+    return response.success(res, "Payment verified successfully", 200, {
+      order,
+    });
   }),
 );
 
+// Razorpay webhook (for async payment events)
 router.post(
   "/webhook",
   asyncHandler(async (req, res) => {
@@ -103,26 +177,36 @@ router.post(
 
     const paymentDetails = req.body.payload.payment.entity;
 
-    const createOrderStatus = await OrderStatus.create({
-      orderId: paymentDetails._id,
-      status: "Order",
-      description: "Order has been placed successfully",
-      productId: paymentDetails.productId,
-      userId: paymentDetails.userId,
-    });
-
     if (req.body.event === "payment.captured") {
       // Update order status to paid
-      await AddToCart.deleteMany({ userId: paymentDetails.userId });
-    }
-    if (req.body.event === "payment.failed") {
-      // Update order status to failed
+      const order = await Order.findOneAndUpdate(
+        { razorpayOrderId: paymentDetails.order_id },
+        { $set: { paymentId: paymentDetails.id, status: "paid" } },
+        { new: true },
+      );
+
+      if (order) {
+        await OrderStatus.create({
+          orderId: order._id,
+          status: "Order",
+          description: "Payment captured successfully via webhook",
+          productId: order.productId,
+          userId: order.userId,
+        });
+
+        // Clear cart
+        await AddToCart.findOneAndDelete({ userId: order.userId });
+      }
     }
 
-    return response.success(res, "Webhook received successfully", 200, {
-      order: paymentDetails,
-      orderStatus: createOrderStatus,
-    });
+    if (req.body.event === "payment.failed") {
+      await Order.findOneAndUpdate(
+        { razorpayOrderId: paymentDetails.order_id },
+        { $set: { status: "failed" } },
+      );
+    }
+
+    return response.success(res, "Webhook received successfully", 200);
   }),
 );
 

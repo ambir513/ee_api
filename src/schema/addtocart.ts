@@ -14,6 +14,16 @@ const AddToCartSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "Product",
           },
+          color: {
+            type: String,
+            required: true,
+            trim: true,
+          },
+          size: {
+            type: String,
+            required: true,
+            trim: true,
+          },
           quantity: {
             type: Number,
             min: 1,
