@@ -52,6 +52,18 @@ router.patch(
   }),
 );
 
+// get all addresses for user
+router.get(
+  "/address",
+  checkCookies,
+  asyncHandler(async (req, res) => {
+    const addresses = await Address.find({ userId: req._id }).sort({
+      createdAt: -1,
+    });
+    return response.success(res, "Addresses fetched successfully", 200, addresses);
+  }),
+);
+
 // create address for user
 router.post(
   "/address/create",

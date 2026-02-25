@@ -84,30 +84,31 @@ router.post(
       const id = product._id.toString();
       const qty = quantityMap[id];
 
-      // Apply discount ONLY ONCE per product
+      // Apply discount to ALL units of applicable products
       if (discountedOnceIds.includes(id)) {
         const discountedPrice =
           product.price - (product.price * coupon.discount) / 100;
 
-        totalAmount += discountedPrice; // discounted once
-        totalAmount += product.price * (qty - 1); // remaining full price
+        totalAmount += discountedPrice * qty;
 
         discountProducts.push({
           ...product,
           quantity: qty,
-          discountedOncePrice: discountedPrice,
-          fullPriceQuantity: qty - 1,
+          discountedPrice: Math.round(discountedPrice),
+          totalSavings: Math.round((product.price - discountedPrice) * qty),
         });
       } else {
         totalAmount += product.price * qty;
       }
     }
 
+    totalAmount = Math.round(totalAmount);
+
     await Coupon.updateOne({ _id: coupon._id }, { $inc: { usedCount: 1 } });
 
     return response.success(res, "Coupon applied successfully", 200, {
       code: coupon.code,
-      offer: `${coupon.discount}% off (once per product)`,
+      offer: `${coupon.discount}% off`,
       discountProducts,
       amount: totalAmount,
     });

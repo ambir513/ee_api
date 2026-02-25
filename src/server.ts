@@ -17,6 +17,7 @@ import addToCartRouter from "./api/v1/addtocart/api.js";
 import watchlistRouter from "./api/v1/watchlist/api.js";
 import paymentRouter from "./api/v1/payment/api.js";
 import reviewRouter from "./api/v1/review/api.js";
+import orderRouter from "./api/v1/order/api.js";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -45,6 +46,7 @@ app.use("/api/v1/addtocart", addToCartRouter);
 app.use("/api/v1/watchlist", watchlistRouter);
 app.use("/api/v1/payment", paymentRouter);
 app.use("/api/v1/review", reviewRouter);
+app.use("/api/v1/order", orderRouter);
 
 app.get("/", (req, res) => {
   return response.success(res, "Hello World", 200);
