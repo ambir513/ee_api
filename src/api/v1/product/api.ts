@@ -47,10 +47,11 @@ router.get(
       priceMax,
       rating,
       searchQuery,
+      sort,
     } = req.query;
 
     const pageNumber = Number(page) || 1;
-    const limitNumber = Number(limit) || 10;
+    const limitNumber = Number(limit) || 8;
     const skip = (pageNumber - 1) * limitNumber;
 
     const searchTerm =
@@ -84,7 +85,26 @@ router.get(
 
     const total = await Product.countDocuments(query);
 
+    // Build sort object based on sort parameter (default: newest first)
+    let sortObj: Record<string, 1 | -1> = { createdAt: -1 };
+    switch (sort) {
+      case "price-asc":
+        sortObj = { price: 1 };
+        break;
+      case "price-desc":
+        sortObj = { price: -1 };
+        break;
+      case "rating":
+        sortObj = { averageRating: -1, ratingCount: -1 };
+        break;
+      case "newest":
+      default:
+        sortObj = { createdAt: -1 };
+        break;
+    }
+
     const products = await Product.find(query)
+      .sort(sortObj)
       .skip(skip)
       .limit(limitNumber)
       .lean();
