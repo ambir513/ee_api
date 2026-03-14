@@ -36,19 +36,36 @@ router.post(
       return response.failure(res, "Address not found", 404);
     }
 
-    // Get user's cart with populated product info
-    const userCart = await AddToCart.findOne({
+    // Some users may have duplicate cart documents; pick the latest non-empty cart.
+    const userCarts = await AddToCart.find({
       userId: req?._id!,
     })
       .populate("items.productId")
+      .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
 
-    if (!userCart || !userCart.items || userCart.items.length === 0) {
+    const userCart = userCarts.find(
+      (cart: any) => Array.isArray(cart?.items) && cart.items.length > 0,
+    );
+
+    if (!userCart) {
+      return response.failure(res, "Cart is empty", 400);
+    }
+
+    const validItems = userCart.items.filter((item: any) => {
+      return (
+        item?.productId &&
+        (item.quantity ?? 0) > 0 &&
+        (item.totalPrice ?? 0) > 0
+      );
+    });
+
+    if (validItems.length === 0) {
       return response.failure(res, "Cart is empty", 400);
     }
 
     // Build product summary for Razorpay notes
-    const cartSummary = userCart.items.map((item: any) => ({
+    const cartSummary = validItems.map((item: any) => ({
       productId: item.productId?._id,
       name: item.productId?.name,
       color: item.color,
@@ -76,7 +93,7 @@ router.post(
       razorpayOrderId: createOrder.id,
       amount: amount,
       userId: req?._id!,
-      productId: (userCart.items[0]?.productId as any)?._id || userCart.items[0]?.productId,
+      productId: (validItems[0]?.productId as any)?._id || validItems[0]?.productId,
       status: createOrder.status,
       currency: createOrder.currency,
       receipt: createOrder.receipt!,
@@ -150,8 +167,8 @@ router.post(
       userId: req?._id!,
     });
 
-    // Clear user's cart after successful payment
-    await AddToCart.findOneAndDelete({ userId: req?._id! });
+    // Clear all user cart docs after successful payment (handles duplicate cart docs).
+    await AddToCart.deleteMany({ userId: req?._id! });
 
     return response.success(res, "Payment verified successfully", 200, {
       order,
@@ -194,8 +211,8 @@ router.post(
           userId: order.userId,
         });
 
-        // Clear cart
-        await AddToCart.findOneAndDelete({ userId: order.userId });
+        // Clear all cart docs for this user
+        await AddToCart.deleteMany({ userId: order.userId });
       }
     }
 
