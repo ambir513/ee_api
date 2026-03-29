@@ -9,8 +9,132 @@ import Order from "../../../schema/order.js";
 import OrderStatus from "../../../schema/orderStatus.js";
 import { validateWebhookSignature } from "razorpay/dist/utils/razorpay-utils.js";
 import AddToCart from "../../../schema/addtocart.js";
+import { sendEmail } from "../../../libs/brevo.js";
+import { log } from "../../../utils/logger.js";
 
 const router = express.Router();
+
+function formatCurrency(value: number, currency = "INR") {
+  try {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${currency} ${value}`;
+  }
+}
+
+function getPrimaryAdminEmail() {
+  const adminList = (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return adminList[0] || null;
+}
+
+function getCustomerFromOrder(order: any) {
+  const name =
+    (order?.notes?.name as string) ||
+    (typeof order?.userId === "object" && order?.userId?.name) ||
+    "Customer";
+
+  const email =
+    (order?.notes?.email as string) ||
+    (typeof order?.userId === "object" && order?.userId?.email) ||
+    "";
+
+  return { name, email };
+}
+
+function buildAdminOrderEmail(order: any) {
+  const customer = getCustomerFromOrder(order);
+  const amount = formatCurrency(order.amount, order.currency || "INR");
+
+  return {
+    subject: `New Order Received - ${order.receipt}`,
+    htmlContent: `
+      <div style="font-family: Arial, sans-serif; color: #222; line-height: 1.6;">
+        <h2 style="margin: 0 0 12px;">New Order Alert</h2>
+        <p style="margin: 0 0 12px;">A new order has been paid successfully.</p>
+        <table style="border-collapse: collapse; width: 100%; max-width: 560px;">
+          <tr><td style="padding: 6px 0; font-weight: 600;">Order ID:</td><td style="padding: 6px 0;">${order._id}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: 600;">Receipt:</td><td style="padding: 6px 0;">${order.receipt}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: 600;">Amount:</td><td style="padding: 6px 0;">${amount}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: 600;">Customer:</td><td style="padding: 6px 0;">${customer.name}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: 600;">Email:</td><td style="padding: 6px 0;">${customer.email || "N/A"}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: 600;">Payment ID:</td><td style="padding: 6px 0;">${order.paymentId || "N/A"}</td></tr>
+        </table>
+      </div>
+    `,
+  };
+}
+
+function buildCustomerOrderEmail(order: any) {
+  const customer = getCustomerFromOrder(order);
+  const amount = formatCurrency(order.amount, order.currency || "INR");
+
+  return {
+    to: customer,
+    subject: `Thank you for your order - ${order.receipt}`,
+    htmlContent: `
+      <div style="font-family: Arial, sans-serif; color: #222; line-height: 1.6;">
+        <h2 style="margin: 0 0 12px;">Thank You For Your Order</h2>
+        <p style="margin: 0 0 12px;">Hi ${customer.name},</p>
+        <p style="margin: 0 0 12px;">We have received your payment and your order is confirmed.</p>
+        <table style="border-collapse: collapse; width: 100%; max-width: 560px;">
+          <tr><td style="padding: 6px 0; font-weight: 600;">Receipt:</td><td style="padding: 6px 0;">${order.receipt}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: 600;">Amount Paid:</td><td style="padding: 6px 0;">${amount}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: 600;">Payment ID:</td><td style="padding: 6px 0;">${order.paymentId || "N/A"}</td></tr>
+        </table>
+        <p style="margin: 14px 0 0;">Our team will start processing your order shortly.</p>
+        <p style="margin: 8px 0 0;">Regards,<br />Ethnic Elegance Team</p>
+      </div>
+    `,
+  };
+}
+
+async function sendOrderSuccessEmails(order: any) {
+  const adminEmail = getPrimaryAdminEmail();
+  const customerMail = buildCustomerOrderEmail(order);
+
+  const tasks: Promise<any>[] = [];
+
+  if (adminEmail) {
+    const adminMail = buildAdminOrderEmail(order);
+    tasks.push(
+      sendEmail({
+        subject: adminMail.subject,
+        htmlContent: adminMail.htmlContent,
+        to: { email: adminEmail, name: "Admin" },
+      }),
+    );
+  }
+
+  if (customerMail.to.email) {
+    tasks.push(
+      sendEmail({
+        subject: customerMail.subject,
+        htmlContent: customerMail.htmlContent,
+        to: {
+          email: customerMail.to.email,
+          name: customerMail.to.name,
+        },
+      }),
+    );
+  }
+
+  if (tasks.length === 0) return;
+
+  const results = await Promise.allSettled(tasks);
+  results.forEach((result) => {
+    if (result.status === "rejected") {
+      log(`Order email failed: ${String(result.reason)}`, "error");
+    }
+  });
+}
 
 // Create Razorpay order from cart
 router.post(
@@ -75,7 +199,7 @@ router.post(
     }));
 
     const createOrder = await razorpayInstance.orders.create({
-      amount: amount * 100, // Razorpay expects amount in paise
+      amount: Math.round(amount * 100), // Razorpay expects integer paise
       currency: "INR",
       receipt: `receipt_order_${Date.now()}`,
       notes: {
@@ -109,6 +233,7 @@ router.post(
     return response.success(res, "Order created successfully", 201, {
       order,
       razorpayOrder: createOrder,
+      keyId: process.env.RAZORPAY_KEY_ID,
     });
   }),
 );
@@ -140,35 +265,48 @@ router.post(
       return response.failure(res, "Payment verification failed", 400);
     }
 
-    const order = await Order.findOneAndUpdate(
-      {
-        razorpayOrderId: razorpay_order_id,
-        userId: req?._id!,
-      },
-      {
-        $set: {
-          paymentId: razorpay_payment_id,
-          status: "paid",
-        },
-      },
-      { new: true },
-    );
-
-    if (!order) {
-      return response.failure(res, "Order not found", 404);
-    }
-
-    // Create order status entry
-    await OrderStatus.create({
-      orderId: order._id,
-      status: "Order",
-      description: "Order placed and payment received successfully",
-      productId: order.productId,
+    const existingOrder = await Order.findOne({
+      razorpayOrderId: razorpay_order_id,
       userId: req?._id!,
     });
 
+    if (!existingOrder) {
+      return response.failure(res, "Order not found", 404);
+    }
+
+    // Idempotent verify: if already paid, do not duplicate status entries/emails.
+    if (existingOrder.status === "paid") {
+      return response.success(res, "Payment already verified", 200, {
+        order: existingOrder,
+      });
+    }
+
+    existingOrder.paymentId = razorpay_payment_id;
+    existingOrder.status = "paid";
+    await existingOrder.save();
+
+    const order = existingOrder;
+
+    // Create order status entry if not present
+    const existingOrderStatus = await OrderStatus.findOne({
+      orderId: order._id,
+      status: "Order",
+    }).lean();
+
+    if (!existingOrderStatus) {
+      await OrderStatus.create({
+        orderId: order._id,
+        status: "Order",
+        description: "Order placed and payment received successfully",
+        productId: order.productId,
+        userId: req?._id!,
+      });
+    }
+
     // Clear all user cart docs after successful payment (handles duplicate cart docs).
     await AddToCart.deleteMany({ userId: req?._id! });
+
+    await sendOrderSuccessEmails(order);
 
     return response.success(res, "Payment verified successfully", 200, {
       order,
@@ -195,24 +333,45 @@ router.post(
     const paymentDetails = req.body.payload.payment.entity;
 
     if (req.body.event === "payment.captured") {
-      // Update order status to paid
-      const order = await Order.findOneAndUpdate(
-        { razorpayOrderId: paymentDetails.order_id },
-        { $set: { paymentId: paymentDetails.id, status: "paid" } },
-        { new: true },
-      );
+      const existingOrder = await Order.findOne({
+        razorpayOrderId: paymentDetails.order_id,
+      });
+
+      if (!existingOrder) {
+        return response.success(res, "Webhook received successfully", 200);
+      }
+
+      // Idempotent webhook: skip duplicates for already paid orders.
+      if (existingOrder.status === "paid") {
+        return response.success(res, "Webhook received successfully", 200);
+      }
+
+      existingOrder.paymentId = paymentDetails.id;
+      existingOrder.status = "paid";
+      await existingOrder.save();
+
+      const order = existingOrder;
 
       if (order) {
-        await OrderStatus.create({
+        const existingOrderStatus = await OrderStatus.findOne({
           orderId: order._id,
           status: "Order",
-          description: "Payment captured successfully via webhook",
-          productId: order.productId,
-          userId: order.userId,
-        });
+        }).lean();
+
+        if (!existingOrderStatus) {
+          await OrderStatus.create({
+            orderId: order._id,
+            status: "Order",
+            description: "Payment captured successfully via webhook",
+            productId: order.productId,
+            userId: order.userId,
+          });
+        }
 
         // Clear all cart docs for this user
         await AddToCart.deleteMany({ userId: order.userId });
+
+        await sendOrderSuccessEmails(order);
       }
     }
 

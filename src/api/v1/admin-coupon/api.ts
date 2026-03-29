@@ -9,6 +9,117 @@ import mongoose from "mongoose";
 
 const router = express.Router();
 
+type CouponPayload = {
+  code?: string;
+  discount?: number;
+  minOrderValue?: number;
+  usageLimit?: number;
+  validFrom?: string;
+  validTill?: string;
+  isActive?: boolean;
+  applicableTo?: string[];
+};
+
+function parseNumber(value: unknown): number {
+  return typeof value === "number" ? value : Number(value);
+}
+
+function normalizeCouponPayload(
+  payload: CouponPayload,
+  options: { partial?: boolean } = {},
+) {
+  const partial = options.partial ?? false;
+  const normalized: CouponPayload = {};
+
+  const hasField = (key: keyof CouponPayload) =>
+    payload[key] !== undefined && payload[key] !== null;
+
+  if (!partial || hasField("code")) {
+    const code = String(payload.code ?? "").trim().toUpperCase();
+    if (!code) {
+      return { error: "Coupon code is required" };
+    }
+    normalized.code = code;
+  }
+
+  if (!partial || hasField("discount")) {
+    const discount = parseNumber(payload.discount);
+    if (!Number.isFinite(discount)) {
+      return { error: "Discount must be a valid number" };
+    }
+    if (discount < 0 || discount > 100) {
+      return { error: "Discount must be between 0 and 100" };
+    }
+    normalized.discount = Number(discount.toFixed(2));
+  }
+
+  if (!partial || hasField("minOrderValue")) {
+    const minOrderValue = parseNumber(payload.minOrderValue);
+    if (!Number.isFinite(minOrderValue)) {
+      return { error: "Minimum order value must be a valid number" };
+    }
+    if (minOrderValue < 0) {
+      return { error: "Minimum order value cannot be negative" };
+    }
+    normalized.minOrderValue = minOrderValue;
+  }
+
+  if (!partial || hasField("usageLimit")) {
+    const usageLimit = parseNumber(payload.usageLimit);
+    if (!Number.isFinite(usageLimit) || !Number.isInteger(usageLimit)) {
+      return { error: "Usage limit must be an integer" };
+    }
+    if (usageLimit < 1) {
+      return { error: "Usage limit must be at least 1" };
+    }
+    normalized.usageLimit = usageLimit;
+  }
+
+  if (!partial || hasField("validFrom")) {
+    const validFrom = new Date(String(payload.validFrom));
+    if (Number.isNaN(validFrom.getTime())) {
+      return { error: "Valid from date is invalid" };
+    }
+    normalized.validFrom = validFrom.toISOString();
+  }
+
+  if (!partial || hasField("validTill")) {
+    const validTill = new Date(String(payload.validTill));
+    if (Number.isNaN(validTill.getTime())) {
+      return { error: "Valid till date is invalid" };
+    }
+    normalized.validTill = validTill.toISOString();
+  }
+
+  if (normalized.validFrom && normalized.validTill) {
+    if (new Date(normalized.validTill) < new Date(normalized.validFrom)) {
+      return { error: "Valid till date must be after valid from date" };
+    }
+  }
+
+  if (!partial || hasField("isActive")) {
+    if (typeof payload.isActive !== "boolean") {
+      return { error: "Active flag must be true or false" };
+    }
+    normalized.isActive = payload.isActive;
+  }
+
+  if (!partial || hasField("applicableTo")) {
+    if (!Array.isArray(payload.applicableTo)) {
+      return { error: "Applicable products must be an array" };
+    }
+    const hasInvalidProductId = payload.applicableTo.some(
+      (id) => !mongoose.Types.ObjectId.isValid(id),
+    );
+    if (hasInvalidProductId) {
+      return { error: "One or more product IDs are invalid" };
+    }
+    normalized.applicableTo = payload.applicableTo;
+  }
+
+  return { data: normalized };
+}
+
 // List all coupons (admin)
 router.get(
   "/coupons/list",
@@ -64,6 +175,11 @@ router.post(
   checkCookies,
   InputSensitization,
   asyncHandler(async (req, res) => {
+    const normalizedPayloadResult = normalizeCouponPayload(req.body);
+    if (normalizedPayloadResult.error) {
+      return response.failure(res, normalizedPayloadResult.error, 400);
+    }
+
     const {
       code,
       discount,
@@ -72,8 +188,8 @@ router.post(
       validFrom,
       validTill,
       isActive,
-      applicableTo,
-    } = req.body;
+      applicableTo = [],
+    } = normalizedPayloadResult.data!;
 
     const productExists = await Product.find({
       _id: {
@@ -91,8 +207,8 @@ router.post(
       minOrderValue,
       usageLimit,
       isActive,
-      validFrom: new Date(validFrom).toISOString(),
-      validTill: new Date(validTill).toISOString(),
+      validFrom,
+      validTill,
       applicableTo,
     });
 
@@ -111,9 +227,32 @@ router.patch(
       return response.failure(res, "Coupon ID is required", 400);
     }
 
+    const normalizedPayloadResult = normalizeCouponPayload(req.body, {
+      partial: true,
+    });
+    if (normalizedPayloadResult.error) {
+      return response.failure(res, normalizedPayloadResult.error, 400);
+    }
+
+    const payload = normalizedPayloadResult.data!;
+
+    if (payload.applicableTo) {
+      const productExists = await Product.find({
+        _id: {
+          $in: payload.applicableTo.map(
+            (id: string) => new mongoose.Types.ObjectId(id),
+          ),
+        },
+      });
+
+      if (productExists.length !== payload.applicableTo.length) {
+        return response.failure(res, "Applicable product does not exist", 400);
+      }
+    }
+
     const updatedCoupon = await Coupon.findByIdAndUpdate(
       couponId,
-      { $set: req.body },
+      { $set: payload },
       { new: true },
     ).lean();
 
