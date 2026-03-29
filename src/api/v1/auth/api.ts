@@ -147,7 +147,11 @@ router.get(
   "/logout",
   checkCookies,
   asyncHandler(async (req, res) => {
-    res.clearCookie("token");
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+    });
     return response.success(res, "Logged out successfully", 200);
   }),
 );
