@@ -61,5 +61,14 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 connectDB().then(() => {
   app.listen(PORT, () => {
     log(`Running - http://localhost:${PORT}`, "success");
+
+    // Prevent Render.com free tier cold starts by self-pinging every 14 minutes
+    const renderUrl = process.env.RENDER_EXTERNAL_URL;
+    if (renderUrl) {
+      setInterval(() => {
+        fetch(renderUrl).catch(() => {});
+      }, 14 * 60 * 1000);
+      log("Keep-alive ping enabled for Render", "success");
+    }
   });
 });
