@@ -12,6 +12,51 @@ import AddToCart from "../../../schema/addtocart.js";
 import { sendEmail } from "../../../libs/brevo.js";
 import { log } from "../../../utils/logger.js";
 
+/**
+ * Decrement product stock for each item in the order.
+ * Reads the `notes.products` array (saved during order creation) and atomically
+ * decrements `variants.$.size.$.stock` for each colour + size combination.
+ */
+async function decrementStock(order: any): Promise<void> {
+  const products: any[] = Array.isArray(order?.notes?.products)
+    ? order.notes.products
+    : [];
+
+  if (products.length === 0) {
+    console.log("decrementStock: no products in order notes – skipping");
+    return;
+  }
+
+  const ops = products.map((item: any) =>
+    Product.updateOne(
+      {
+        _id: item.productId,
+        "variants.color": item.color,
+        "variants.size.size": item.size,
+      },
+      {
+        $inc: { "variants.$[v].size.$[s].stock": -(item.quantity || 1) },
+      },
+      {
+        arrayFilters: [
+          { "v.color": item.color },
+          { "s.size": item.size },
+        ],
+      },
+    ),
+  );
+
+  const results = await Promise.allSettled(ops);
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      log(
+        `decrementStock failed for product ${products[i]?.productId}: ${String(r.reason)}`,
+        "error",
+      );
+    }
+  });
+}
+
 const router = express.Router();
 
 function formatCurrency(value: number, currency = "INR") {
@@ -49,9 +94,45 @@ function getCustomerFromOrder(order: any) {
   return { name, email };
 }
 
+function buildProductRows(order: any): string {
+  const products: any[] = Array.isArray(order?.notes?.products)
+    ? order.notes.products
+    : [];
+
+  if (products.length === 0) return "";
+
+  const rows = products
+    .map(
+      (item: any) => `
+      <tr>
+        <td style="padding: 8px 10px; border-bottom: 1px solid #eee;">${item.name || "Product"}</td>
+        <td style="padding: 8px 10px; border-bottom: 1px solid #eee;">${item.color || "-"}</td>
+        <td style="padding: 8px 10px; border-bottom: 1px solid #eee;">${item.size || "-"}</td>
+        <td style="padding: 8px 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity || 1}</td>
+        <td style="padding: 8px 10px; border-bottom: 1px solid #eee; text-align: right;">₹${(item.price ?? 0).toLocaleString("en-IN")}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `
+    <table style="border-collapse: collapse; width: 100%; max-width: 600px; margin: 14px 0; font-size: 14px;">
+      <thead>
+        <tr style="background: #f5f5f5;">
+          <th style="padding: 8px 10px; text-align: left; font-weight: 600;">Product</th>
+          <th style="padding: 8px 10px; text-align: left; font-weight: 600;">Color</th>
+          <th style="padding: 8px 10px; text-align: left; font-weight: 600;">Size</th>
+          <th style="padding: 8px 10px; text-align: center; font-weight: 600;">Qty</th>
+          <th style="padding: 8px 10px; text-align: right; font-weight: 600;">Price</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 function buildAdminOrderEmail(order: any) {
   const customer = getCustomerFromOrder(order);
   const amount = formatCurrency(order.amount, order.currency || "INR");
+  const productTable = buildProductRows(order);
 
   return {
     subject: `New Order Received - ${order.receipt}`,
@@ -67,6 +148,7 @@ function buildAdminOrderEmail(order: any) {
           <tr><td style="padding: 6px 0; font-weight: 600;">Email:</td><td style="padding: 6px 0;">${customer.email || "N/A"}</td></tr>
           <tr><td style="padding: 6px 0; font-weight: 600;">Payment ID:</td><td style="padding: 6px 0;">${order.paymentId || "N/A"}</td></tr>
         </table>
+        ${productTable ? `<h3 style="margin: 18px 0 6px; font-size: 15px;">Items Ordered</h3>${productTable}` : ""}
       </div>
     `,
   };
@@ -75,6 +157,7 @@ function buildAdminOrderEmail(order: any) {
 function buildCustomerOrderEmail(order: any) {
   const customer = getCustomerFromOrder(order);
   const amount = formatCurrency(order.amount, order.currency || "INR");
+  const productTable = buildProductRows(order);
 
   return {
     to: customer,
@@ -89,6 +172,7 @@ function buildCustomerOrderEmail(order: any) {
           <tr><td style="padding: 6px 0; font-weight: 600;">Amount Paid:</td><td style="padding: 6px 0;">${amount}</td></tr>
           <tr><td style="padding: 6px 0; font-weight: 600;">Payment ID:</td><td style="padding: 6px 0;">${order.paymentId || "N/A"}</td></tr>
         </table>
+        ${productTable ? `<h3 style="margin: 18px 0 6px; font-size: 15px;">Your Items</h3>${productTable}` : ""}
         <p style="margin: 14px 0 0;">Our team will start processing your order shortly.</p>
         <p style="margin: 8px 0 0;">Regards,<br />Ethnic Elegance Team</p>
       </div>
@@ -287,6 +371,9 @@ router.post(
 
     const order = existingOrder;
 
+    // Decrement stock for every purchased item
+    await decrementStock(order);
+
     // Create order status entry if not present
     const existingOrderStatus = await OrderStatus.findOne({
       orderId: order._id,
@@ -353,6 +440,9 @@ router.post(
       const order = existingOrder;
 
       if (order) {
+        // Decrement stock for every purchased item
+        await decrementStock(order);
+
         const existingOrderStatus = await OrderStatus.findOne({
           orderId: order._id,
           status: "Order",
