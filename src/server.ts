@@ -7,6 +7,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import authRouter from "./api/v1/auth/api.js";
 import adminProductRouter from "./api/v1/admin-product/api.js";
+import adminDashboardRouter from "./api/v1/admin-dashboard/api.js";
 import signatureRouter from "./signature.route.js";
 import checkCookies from "./utils/m-check-cookies.js";
 import adminCouponRouter from "./api/v1/admin-coupon/api.js";
@@ -40,6 +41,7 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/account", accountRouter);
 app.use("/api/v1/product", ProductRouter);
 app.use("/api/v1/admin", adminProductRouter);
+app.use("/api/v1/admin", adminDashboardRouter);
 app.use("/api/v1/admin", adminCouponRouter);
 app.use("/api/v1/coupon", couponCodeRouter);
 app.use("/api/v1/cloudinary", checkCookies, signatureRouter);
@@ -66,7 +68,7 @@ connectDB().then(() => {
     const renderUrl = process.env.RENDER_EXTERNAL_URL;
     if (renderUrl) {
       setInterval(() => {
-        fetch(renderUrl).catch(() => {});
+        fetch(renderUrl).catch(() => { });
       }, 14 * 60 * 1000);
       log("Keep-alive ping enabled for Render", "success");
     }

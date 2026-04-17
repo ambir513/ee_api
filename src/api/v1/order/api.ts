@@ -221,4 +221,103 @@ router.post(
     }),
 );
 
+// Admin: Edit the latest order status entry
+router.patch(
+    "/admin/update-status/:orderId",
+    checkCookies,
+    asyncHandler(async (req, res) => {
+        if (!req.email || !isAdminEmail.includes(req.email.toLowerCase())) {
+            return response.failure(res, "Forbidden: Admins only", 403);
+        }
+
+        const { orderId } = req.params;
+        const { status, description } = req.body;
+
+        if (!orderId || !status) {
+            return response.failure(res, "Order ID and status are required", 400);
+        }
+
+        const validStatuses = [
+            "Order",
+            "Shipped",
+            "Out of Delivery",
+            "Delivered",
+            "Cancelled",
+        ];
+
+        if (!validStatuses.includes(status)) {
+            return response.failure(
+                res,
+                `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+                400,
+            );
+        }
+
+        const order = await Order.findById(orderId).lean();
+        if (!order) {
+            return response.failure(res, "Order not found", 404);
+        }
+
+        const statusDescriptions: Record<string, string> = {
+            Order: "Order placed and payment received successfully",
+            Shipped: "Your order has been shipped and is on its way",
+            "Out of Delivery": "Your order is out for delivery",
+            Delivered: "Your order has been delivered successfully",
+            Cancelled: "Your order has been cancelled",
+        };
+
+        const latestStatusEntry = await OrderStatus.findOne({ orderId }).sort({ createdAt: -1 });
+
+        if (!latestStatusEntry) {
+            const createdStatus = await OrderStatus.create({
+                orderId,
+                status,
+                description: description || statusDescriptions[status] || `Order ${status}`,
+                productId: order.productId,
+                userId: order.userId,
+            });
+
+            return response.success(res, "Order status created", 200, createdStatus);
+        }
+
+        latestStatusEntry.status = status;
+        latestStatusEntry.description = description || statusDescriptions[status] || `Order ${status}`;
+        await latestStatusEntry.save();
+
+        return response.success(res, "Order status updated", 200, latestStatusEntry);
+    }),
+);
+
+// Admin: Delete an order and its status history
+router.delete(
+    "/admin/delete/:orderId",
+    checkCookies,
+    asyncHandler(async (req, res) => {
+        if (!req.email || !isAdminEmail.includes(req.email.toLowerCase())) {
+            return response.failure(res, "Forbidden: Admins only", 403);
+        }
+
+        const { orderId } = req.params;
+
+        if (!orderId) {
+            return response.failure(res, "Order ID is required", 400);
+        }
+
+        const order = await Order.findById(orderId).lean();
+
+        if (!order) {
+            return response.failure(res, "Order not found", 404);
+        }
+
+        await Promise.all([
+            OrderStatus.deleteMany({ orderId }),
+            Order.findByIdAndDelete(orderId),
+        ]);
+
+        return response.success(res, "Order deleted successfully", 200, {
+            deletedOrderId: orderId,
+        });
+    }),
+);
+
 export default router;
