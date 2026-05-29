@@ -15,9 +15,9 @@ export interface UserModel extends Model<UserDocument> {
   /**
    * This method checks if a user with the given email exists in the database.
    * @param email
-   * @return Promise that resolves to true if the user exists, false otherwise.
+   * @return Promise that resolves to the user document if found, null otherwise.
    */
-  isUserExists(email: string): Promise<boolean>;
+  isUserExists(email: string): Promise<UserDocument | null>;
 
   /**
    * This method hashes the given password using a secure hashing algorithm.

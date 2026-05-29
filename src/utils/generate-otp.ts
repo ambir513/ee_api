@@ -21,7 +21,7 @@ export default async function generateOTP(
     email: data.email,
     otp: otp.toString(),
     name: data.name,
-    password: data.password,
+    password: data.password || data.newPassword,
     role: data.role,
     label,
   });

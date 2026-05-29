@@ -14,6 +14,7 @@ declare global {
 
 const PUBLIC_ROUTES = [
   "/sign-up",
+  "/resend-otp",
   "/verify-email",
   "/login",
   "/forgot-password",

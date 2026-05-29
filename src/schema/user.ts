@@ -53,10 +53,10 @@ const userSchema = new mongoose.Schema<UserDocument, UserModel>(
 );
 
 userSchema.statics.isUserExists = async function (email: string): Promise<any> {
-  const exists = await this.exists({ email }).select(
-    "password avatar name email role addresses",
+  const user = await this.findOne({ email }).select(
+    "password avatar name email role",
   );
-  return exists;
+  return user;
 };
 
 userSchema.statics.hashPassword = async function (
